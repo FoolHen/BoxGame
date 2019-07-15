@@ -1,0 +1,9 @@
+{
+	"Name": "BoxGame",
+	"Authors": ["FoolHen"],
+	"Description": "Minigame where 2 teams spawn at a big cube made of multiple boxes that you can break",
+	"URL": "",
+	"Version": "0",
+	"HasWebUI": false,
+	"HasVeniceEXT": true
+}
