@@ -11,20 +11,23 @@ local m_AreaWidth = 10
 local m_AreaLength = 20
 local m_AreaHeight = 10
 
-local m_StartingPos = {x=0, y=100, z=0}
+local m_StartingPos = { x = 0, y = 100, z = 0}
 
+-- These are the sizes of the box. It's 1m wide and 1.29m tall.
 local m_BoxWidth = 1
 local m_BoxHeight = 1.29
 
-local soldierAsset = nil
-local soldierBlueprint = nil
-local weapon = nil
-local M320 = nil
-local weaponAtt0 = nil
-local weaponAtt1 = nil
-local drPepper = nil
+-- In these vars we keep references of weapons, attachments and soldier info to spawn soldiers later.
+local m_SoldierAsset = nil
+local m_SoldierBlueprint = nil
+local m_Weapon = nil
+local m_M320 = nil
+local m_WeaponAtt0 = nil
+local m_WeaponAtt1 = nil
+local m_DrPepper = nil
 
 local m_DisabledBoxes = {}
+local m_LevelLoaded = false
 
 function string:split(sep)
 	local sep, fields = sep or ":", {}
@@ -35,42 +38,41 @@ end
 
 function BoxGameServer:__init()
 	print("Initializing BoxGameServer")
-	self:RegisterVars()
 	self:RegisterEvents()
-end
-
-
-function BoxGameServer:RegisterVars()
-	self.m_LevelLoaded = false
 end
 
 function BoxGameServer:RegisterEvents()
 	Events:Subscribe('Partition:Loaded', self, self.OnPartitionLoaded)
 	Events:Subscribe('Server:LevelLoaded', self, self.OnLevelLoaded)
-	Events:Subscribe('Level:LoadResources', OnLoadResources)
+	-- Events:Subscribe('Level:LoadResources', OnLoadResources)
 	Events:Subscribe('Player:Chat', self, self.OnChat)
 	Hooks:Install('ServerEntityFactory:CreateFromBlueprint', 999, self, self.OnEntityCreateFromBlueprint)
 end
 
 function BoxGameServer:OnLoadResources()
-	soldierAsset = nil
-	soldierBlueprint = nil
-	weapon = nil
-	weaponAtt0 = nil
-	weaponAtt1 = nil
-	drPepper = nil
+	m_SoldierAsset = nil
+	m_SoldierBlueprint = nil
+	m_Weapon = nil
+	m_M320 = nil
+	m_WeaponAtt0 = nil
+	m_WeaponAtt1 = nil
+	m_DrPepper = nil
 end
 
 function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
-	self.m_LevelLoaded = true
-	for x=1, m_AreaWidth do
-		for y=1, m_AreaHeight do
-			for z=1, m_AreaLength do
+	m_LevelLoaded = true
+
+	-- Spawn all boxes.
+	for x = 1, m_AreaWidth do
+		for y = 1, m_AreaHeight do
+			for z = 1, m_AreaLength do
+				print(x..","..y..","..z)
 				self:SpawnBox(x, y, z)
 			end
 		end
 	end
-
+	print("walls now")
+	-- Spawn the walls that divide the top of the boxes in 2 spawn areas.
 	self:SpawnWalls()
 end
 
@@ -83,58 +85,81 @@ function BoxGameServer:OnChat(player, recipientMask, message)
 
 	local parts = message:split(' ')
 
-	if parts[1] == 'spawn' then
-		self:SpawnPlayer(player)
-	end
+	-- if parts[1] == '!spawn' then
+	-- 	self:SpawnPlayer(player)
+	-- end
 
 	if parts[1] == '!start' then
-		for _, l_InstanceId in pairs(m_DisabledBoxes) do
-			Events:Dispatch('BlueprintManager:EnableEntityByEntityId', l_InstanceId, true)
-		end
+		self:StartRound()
+	end
+end
 
-		m_DisabledBoxes = {}
+function BoxGameServer:StartRound()
+	-- Enable all disabled entities.
+	for _, l_InstanceId in pairs(m_DisabledBoxes) do
+		Events:Dispatch('BlueprintManager:EnableEntityByEntityId', l_InstanceId, true)
+	end
 
-		for _, l_Player in pairs(PlayerManager:GetPlayers()) do
-			if l_Player.soldier ~= nil then
-				l_Player.soldier:Kill(false)
-			end
-		end
+	-- Clear table of disabled entities.
+	m_DisabledBoxes = {}
 
-		for _, l_Player in pairs(PlayerManager:GetPlayers()) do
-			self:SpawnPlayer(l_Player)
+	-- If there's any player alive we kill him.
+	for _, l_Player in pairs(PlayerManager:GetPlayers()) do
+		if l_Player.soldier ~= nil then
+			l_Player.soldier:Kill(false)
 		end
+	end
+
+	-- Spawn every player.
+	for _, l_Player in pairs(PlayerManager:GetPlayers()) do
+		self:SpawnPlayer(l_Player)
 	end
 end
 
 function BoxGameServer:OnEntityCreateFromBlueprint(p_Hook, p_Blueprint, p_Transform, p_Variation, p_Parent )
-	if not self.m_LevelLoaded then
-		p_Hook:Call()
+	-- Ignore if the level is loading.
+	if not m_LevelLoaded then
+		p_Hook:Next()
 		return
 	end
 
+	-- We only care about the box instance, otherwise we dont mess with the hook.
+	if p_Blueprint.instanceGuid ~= m_BoxInstanceGuid then
+		p_Hook:Next()
+		return
+	end
+
+	-- Call the hook and save the entities it created with the blueprint.
 	local entities = p_Hook:Call()
 
 	if entities == nil then
 		return
 	end
 
-	if p_Blueprint.instanceGuid == m_BoxInstanceGuid then
-		for k,entity in pairs(entities) do
-			if entity:Is('ServerPhysicsEntity') then
-				entity = PhysicsEntity(entity)
+	-- Loop through all the entities. Blueprints can spawn more than one entity. In this case we care about the physic entity, so we can 
+	-- assign a callback to it.
+	for _, entity in pairs(entities) do
+		if entity:Is('ServerPhysicsEntity') then
+			-- Cast it.
+			entity = PhysicsEntity(entity)
 
-				entity:RegisterCollisionCallback(function(entity, info)
-					if info.entity:Is("ServerGrenadeEntity") then
-						info.entity:Destroy()
+			-- Now we register a collision callback.
+			entity:RegisterCollisionCallback(function(entity, info)
+				-- When a collision happens we check if the colliding entity is a grenade.
+				if info.entity:Is("ServerGrenadeEntity") then
+					-- Destroy the grenade as we dont want it to keep colliding with other blocks or explode.
+					info.entity:Destroy()
 
-						local instanceId = entity.instanceId
-						Events:Dispatch('BlueprintManager:EnableEntityByEntityId', instanceId, false)
+					-- We tell BlueprintManager to disable all entities that the box blueprint created with the entityId of this particular entity.
+					-- BlueprintManager stores all entities' ids of each blueprint.
+					local instanceId = entity.instanceId
+					Events:Dispatch('BlueprintManager:EnableEntityByEntityId', instanceId, false)
 
-						table.insert(m_DisabledBoxes, instanceId)
-					end
-					
-				end)
-			end
+					-- We save the entity id so we can enable it back later. 
+					table.insert(m_DisabledBoxes, instanceId)
+				end
+				
+			end)
 		end
 	end
 end
@@ -143,18 +168,22 @@ function BoxGameServer:OnPartitionLoaded(p_Partition)
 	local instances = p_Partition.instances
 
 	for _, instance in pairs(instances) do
+
+		-- Check if the instance is of the type we are looking for.
 		if instance.typeInfo.name == 'VeniceSoldierCustomizationAsset' then
+			-- Cast it in order to access its members.
 			local asset = VeniceSoldierCustomizationAsset(instance)
 
+			-- Check if its name is the one we want save for later.
 			if asset.name == 'Gameplay/Kits/RURecon' then
 				print('Found soldier customization asset ' .. asset.name)
-				soldierAsset = asset
+				m_SoldierAsset = asset
 			end
 		end
 
 		if instance.typeInfo.name == 'SoldierBlueprint' then
-			soldierBlueprint = SoldierBlueprint(instance)
-			print('Found soldier blueprint ' .. soldierBlueprint.name)
+			m_SoldierBlueprint = SoldierBlueprint(instance)
+			print('Found soldier blueprint ' .. m_SoldierBlueprint.name)
 		end
 
 		if instance.typeInfo.name == 'SoldierWeaponUnlockAsset' then
@@ -162,10 +191,10 @@ function BoxGameServer:OnPartitionLoaded(p_Partition)
 
 			if asset.name == 'Weapons/M416/U_M416' then
 				print('Found soldier weapon unlock asset ' .. asset.name)
-				weapon = asset
+				m_Weapon = asset
 			elseif asset.name == 'Weapons/Gadgets/M320/U_M320_LVG' then
 				print('Found soldier weapon unlock asset ' .. asset.name)
-				M320 = asset
+				m_M320 = asset
 			end
 		end
 		if instance.typeInfo.name == 'UnlockAsset' then
@@ -173,17 +202,17 @@ function BoxGameServer:OnPartitionLoaded(p_Partition)
 
 			if asset.name == 'Weapons/M416/U_M416_ACOG' then
 				print('Found weapon unlock asset ' .. asset.name)
-				weaponAtt0 = asset
+				m_WeaponAtt0 = asset
 			end
 
 			if asset.name == 'Weapons/M416/U_M416_Silencer' then
 				print('Found weapon unlock asset ' .. asset.name)
-				weaponAtt1 = asset
+				m_WeaponAtt1 = asset
 			end
 
 			if asset.name == 'Persistence/Unlocks/Soldiers/Visual/MP/RU/MP_RU_Recon_Appearance_DrPepper' then
 				print('Found appearance asset ' .. asset.name)
-				drPepper = asset
+				m_DrPepper = asset
 			end
 		end
 	end
@@ -195,6 +224,7 @@ function BoxGameServer:SpawnPlayer(player)
 		return
 	end
 
+	-- Create a LinearTransform to spawn the soldier with.
 	local transform = LinearTransform(
 		Vec3(1, 0, 0),
 		Vec3(0, 1, 0),
@@ -202,36 +232,40 @@ function BoxGameServer:SpawnPlayer(player)
 		Vec3(0, 0, 0)
 	)
 
+	-- We calculate the height and the x position of the spawn point.
 	transform.trans.x = m_StartingPos.x + m_AreaWidth * m_BoxWidth / 2
 	transform.trans.y = 1 +  m_StartingPos.y + m_AreaHeight * m_BoxHeight
 
+	-- We now calculate the z position, which is the side of the playable area each team plays on.
 	if player.teamId == TeamId.Team1 then
+		-- 1/4th of the total lenght of the playable area.
 		transform.trans.z = m_StartingPos.z + m_AreaLength * m_BoxWidth / 4
 	elseif player.teamId == TeamId.Team2 then
-		transform.trans.z =m_StartingPos.z + m_AreaLength * 3 *m_BoxWidth / 4
+		-- 3/4ths for team 2.
+		transform.trans.z = m_StartingPos.z + m_AreaLength * 3 * m_BoxWidth / 4
 	else
 		return
 	end
 
-	print('Setting soldier primary weapon')
-	player:SelectWeapon(WeaponSlot.WeaponSlot_0, weapon, { weaponAtt0, weaponAtt1 })
-	player:SelectWeapon(WeaponSlot.WeaponSlot_1, M320, {})
+	-- Setting soldier primary weapon with its attachments and the M320 in the second slot.
+	player:SelectWeapon(WeaponSlot.WeaponSlot_0, m_Weapon, { m_WeaponAtt0, m_WeaponAtt1 })
+	player:SelectWeapon(WeaponSlot.WeaponSlot_1, m_M320, {})
 
-	print('Setting soldier class and appearance')
-	player:SelectUnlockAssets(soldierAsset, { drPepper })
+	-- Setting soldier class and appearance
+	player:SelectUnlockAssets(m_SoldierAsset, { m_DrPepper })
 
-	print('Creating soldier')
-	local soldier = player:CreateSoldier(soldierBlueprint, transform)
+	-- Creating soldier at the position we calculated.
+	local soldier = player:CreateSoldier(m_SoldierBlueprint, transform)
 
 	if soldier == nil then
 		print('Failed to create player soldier')
 		return
 	end
 
-	print('Spawning soldier')
+	-- Spawning soldier
 	player:SpawnSoldierAt(soldier, transform, CharacterPoseType.CharacterPoseType_Stand)
 
-
+	-- Set the ammo of the M320 to 999 and remove additional ammo so you cant reload.
 	player.soldier:SetWeaponPrimaryAmmoByIndex(WeaponSlot.WeaponSlot_1, 999)
 	player.soldier:SetWeaponSecondaryAmmoByIndex(WeaponSlot.WeaponSlot_1, 0)
 
@@ -262,11 +296,15 @@ function BoxGameServer:SpawnWalls()
 			Vec3(1,0,0),
 			Vec3(0,1,0),
 			Vec3(0,0,1),
-			Vec3(m_StartingPos.x + (m_AreaWidth * m_BoxWidth) / 2.0 + 0.5, m_StartingPos.y + (m_AreaHeight * m_BoxHeight) + 3.2, m_StartingPos.z + (m_AreaLength * m_BoxWidth) / 2.0 + 0.5)
+			Vec3(
+				m_StartingPos.x + (m_AreaWidth * m_BoxWidth) / 2.0 + 0.5,
+				m_StartingPos.y + (m_AreaHeight * m_BoxHeight) + 3.2,
+				m_StartingPos.z + (m_AreaLength * m_BoxWidth) / 2.0 + 0.5
+			)
 		)
 	Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall1", m_WallPartitionGuid, m_WallInstanceGuid, tostring(s_Transform), nil)
 
-	--Flip the second wall 180º
+	-- We need to spawn a second wall and flip it 180º, as the other side of the wall doesnt have texture so you can see the other side.
 	s_Transform.left.x = -1
 	s_Transform.forward.z = -1
 
