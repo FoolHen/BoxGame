@@ -6,7 +6,7 @@ local m_BoxPartitionGuid = Guid("8D3FAB68-B78E-11E0-A405-EA03C5FF7246")
 local m_WallInstanceGuid = Guid("4399B484-5158-E694-262F-828DDC325BA3")
 local m_WallPartitionGuid = Guid("55EE9583-5C62-11E0-8D20-91499D5EE2D1")
 
-
+-- Playable area dimensions.
 local m_AreaWidth = 10
 local m_AreaLength = 20
 local m_AreaHeight = 10
@@ -29,13 +29,6 @@ local m_DrPepper = nil
 local m_DisabledBoxes = {}
 local m_LevelLoaded = false
 
-function string:split(sep)
-	local sep, fields = sep or ":", {}
-	local pattern = string.format("([^%s]+)", sep)
-	self:gsub(pattern, function(c) fields[#fields+1] = c end)
-	return fields
-end
-
 function BoxGameServer:__init()
 	print("Initializing BoxGameServer")
 	self:RegisterEvents()
@@ -44,19 +37,29 @@ end
 function BoxGameServer:RegisterEvents()
 	Events:Subscribe('Partition:Loaded', self, self.OnPartitionLoaded)
 	Events:Subscribe('Server:LevelLoaded', self, self.OnLevelLoaded)
-	-- Events:Subscribe('Level:LoadResources', OnLoadResources)
 	Events:Subscribe('Player:Chat', self, self.OnChat)
 	Hooks:Install('ServerEntityFactory:CreateFromBlueprint', 999, self, self.OnEntityCreateFromBlueprint)
+	Hooks:Install('UI:PushScreen', 999, self, self.OnPushScreen)
+	Events:Subscribe('Player:Respawn', self, self.OnPlayerRespawn)
 end
 
-function BoxGameServer:OnLoadResources()
-	m_SoldierAsset = nil
-	m_SoldierBlueprint = nil
-	m_Weapon = nil
-	m_M320 = nil
-	m_WeaponAtt0 = nil
-	m_WeaponAtt1 = nil
-	m_DrPepper = nil
+function BoxGameServer:OnPushScreen(p_Hook, p_Screen, p_GraphPriority, p_ParentGraph)
+	if p_Screen == nil then
+		return
+	end
+
+	local s_Screen = UIGraphAsset(p_Screen)
+
+	if s_Screen.name == 'UI/Flow/Screen/SpawnButtonScreen' then
+		print("foundddddd")
+		p_Hook:Return(nil)
+		return
+	end
+end
+
+function BoxGameServer:OnPlayerRespawn(p_Player)
+	-- Disable parachute, so ppl fall to their death.
+	p_Player:EnableInput(EntryInputActionEnum.EIAToggleParachute, false)
 end
 
 function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
@@ -66,7 +69,7 @@ function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
 	for x = 1, m_AreaWidth do
 		for y = 1, m_AreaHeight do
 			for z = 1, m_AreaLength do
-				print(x..","..y..","..z)
+				-- print(x..","..y..","..z)
 				self:SpawnBox(x, y, z)
 			end
 		end
@@ -77,19 +80,7 @@ function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
 end
 
 function BoxGameServer:OnChat(player, recipientMask, message)
-	if message == '' then
-		return
-	end
-
-	print('Chat: ' .. message)
-
-	local parts = message:split(' ')
-
-	-- if parts[1] == '!spawn' then
-	-- 	self:SpawnPlayer(player)
-	-- end
-
-	if parts[1] == '!start' then
+	if message == '!start' then
 		self:StartRound()
 	end
 end
@@ -136,7 +127,7 @@ function BoxGameServer:OnEntityCreateFromBlueprint(p_Hook, p_Blueprint, p_Transf
 		return
 	end
 
-	-- Loop through all the entities. Blueprints can spawn more than one entity. In this case we care about the physic entity, so we can 
+	-- Loop through all the entities. Blueprints can spawn more than one entity. In this case we care about the physic entity, so we can
 	-- assign a callback to it.
 	for _, entity in pairs(entities) do
 		if entity:Is('ServerPhysicsEntity') then
@@ -147,7 +138,7 @@ function BoxGameServer:OnEntityCreateFromBlueprint(p_Hook, p_Blueprint, p_Transf
 			entity:RegisterCollisionCallback(function(entity, info)
 				-- When a collision happens we check if the colliding entity is a grenade.
 				if info.entity:Is("ServerGrenadeEntity") then
-					-- Destroy the grenade as we dont want it to keep colliding with other blocks or explode.
+					-- Destroy the grenade as we don't want it to keep colliding with other blocks or explode.
 					info.entity:Destroy()
 
 					-- We tell BlueprintManager to disable all entities that the box blueprint created with the entityId of this particular entity.
@@ -155,10 +146,9 @@ function BoxGameServer:OnEntityCreateFromBlueprint(p_Hook, p_Blueprint, p_Transf
 					local instanceId = entity.instanceId
 					Events:Dispatch('BlueprintManager:EnableEntityByEntityId', instanceId, false)
 
-					-- We save the entity id so we can enable it back later. 
+					-- We save the entity id so we can enable it back later.
 					table.insert(m_DisabledBoxes, instanceId)
 				end
-				
 			end)
 		end
 	end
@@ -298,13 +288,13 @@ function BoxGameServer:SpawnWalls()
 			Vec3(0,0,1),
 			Vec3(
 				m_StartingPos.x + (m_AreaWidth * m_BoxWidth) / 2.0 + 0.5,
-				m_StartingPos.y + (m_AreaHeight * m_BoxHeight) + 3.2,
+				m_StartingPos.y + (m_AreaHeight * m_BoxHeight) + 3.5,
 				m_StartingPos.z + (m_AreaLength * m_BoxWidth) / 2.0 + 0.5
 			)
 		)
 	Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall1", m_WallPartitionGuid, m_WallInstanceGuid, tostring(s_Transform), nil)
 
-	-- We need to spawn a second wall and flip it 180º, as the other side of the wall doesnt have texture so you can see the other side.
+	-- We need to spawn a second wall and flip it 180º, as the other side of the wall doesnt have texture so you can see through the other side.
 	s_Transform.left.x = -1
 	s_Transform.forward.z = -1
 
