@@ -39,22 +39,7 @@ function BoxGameServer:RegisterEvents()
 	Events:Subscribe('Server:LevelLoaded', self, self.OnLevelLoaded)
 	Events:Subscribe('Player:Chat', self, self.OnChat)
 	Hooks:Install('ServerEntityFactory:CreateFromBlueprint', 999, self, self.OnEntityCreateFromBlueprint)
-	Hooks:Install('UI:PushScreen', 999, self, self.OnPushScreen)
 	Events:Subscribe('Player:Respawn', self, self.OnPlayerRespawn)
-end
-
-function BoxGameServer:OnPushScreen(p_Hook, p_Screen, p_GraphPriority, p_ParentGraph)
-	if p_Screen == nil then
-		return
-	end
-
-	local s_Screen = UIGraphAsset(p_Screen)
-
-	if s_Screen.name == 'UI/Flow/Screen/SpawnButtonScreen' then
-		print("foundddddd")
-		p_Hook:Return(nil)
-		return
-	end
 end
 
 function BoxGameServer:OnPlayerRespawn(p_Player)
@@ -69,12 +54,11 @@ function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
 	for x = 1, m_AreaWidth do
 		for y = 1, m_AreaHeight do
 			for z = 1, m_AreaLength do
-				-- print(x..","..y..","..z)
 				self:SpawnBox(x, y, z)
 			end
 		end
 	end
-	print("walls now")
+	
 	-- Spawn the walls that divide the top of the boxes in 2 spawn areas.
 	self:SpawnWalls()
 end
