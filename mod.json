@@ -7,7 +7,6 @@
 	"HasWebUI": false,
 	"HasVeniceEXT": true,
 	"Dependencies": {
-		"veniceext": "^1.0.0",
 		"blueprintmanager": "^1.0.0"
 	}
 }
