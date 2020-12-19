@@ -38,12 +38,12 @@ function BoxGameServer:__init()
 end
 
 function BoxGameServer:RegisterEvents()
-	Events:Subscribe('Server:LevelLoaded', self, self.OnLevelLoaded)
+	Events:Subscribe('Level:Loaded', self, self.OnLevelLoaded)
 	Events:Subscribe('Player:Chat', self, self.OnChat)
 	Events:Subscribe('UpdateManager:Update', self, self.OnUpdateManager)
 	Events:Subscribe('Player:Killed', self, self.OnPlayerKilled)
 
-	Hooks:Install('ServerEntityFactory:CreateFromBlueprint', 999, self, self.OnEntityCreateFromBlueprint)
+	Hooks:Install('EntityFactory:CreateFromBlueprint', 999, self, self.OnEntityCreateFromBlueprint)
 
 	Events:Subscribe('Round:PreRoundStart', self, self.OnPreRoundStarted)
 	Events:Subscribe('Round:RoundStart', self, self.OnRoundStarted)
@@ -154,7 +154,7 @@ function BoxGameServer:SetLevel()
 
 	-- Spawn players that are ready.
 	for _, l_PlayerGuid in pairs(m_Round:getPlayersReady()) do
-		local s_Player = PlayerManager:GetPlayerByGUID(l_PlayerGuid)
+		local s_Player = PlayerManager:GetPlayerByGuid(l_PlayerGuid)
 
 		if s_Player ~= nil then
 			self:SpawnPlayer(s_Player)
@@ -235,17 +235,21 @@ function BoxGameServer:SpawnPlayer(player)
 		return
 	end
 
-	local weapon = ResourceManager:FindInstanceByGUID(m_AssetsGuids.m416.partitionGuid, m_AssetsGuids.m416.instanceGuid)
-	local att0 = ResourceManager:FindInstanceByGUID(m_AssetsGuids.acogAtt.partitionGuid, m_AssetsGuids.acogAtt.instanceGuid)
-	local att1 = ResourceManager:FindInstanceByGUID(m_AssetsGuids.silencerAtt.partitionGuid, m_AssetsGuids.silencerAtt.instanceGuid)
-	local grenadeLauncher = ResourceManager:FindInstanceByGUID(m_AssetsGuids.m320.partitionGuid, m_AssetsGuids.m320.instanceGuid)
-	local soldierAsset = ResourceManager:FindInstanceByGUID(m_AssetsGuids.soldierAsset.partitionGuid, m_AssetsGuids.soldierAsset.instanceGuid)
-	local soldierBlueprint = ResourceManager:FindInstanceByGUID(m_AssetsGuids.soldierBlueprint.partitionGuid, m_AssetsGuids.soldierBlueprint.instanceGuid)
-	local drPepper = ResourceManager:FindInstanceByGUID(m_AssetsGuids.drPepperCammo.partitionGuid, m_AssetsGuids.drPepperCammo.instanceGuid)
+	local weapon = ResourceManager:FindInstanceByGuid(m_AssetsGuids.m416.partitionGuid, m_AssetsGuids.m416.instanceGuid)
+	local att0 = ResourceManager:FindInstanceByGuid(m_AssetsGuids.acogAtt.partitionGuid, m_AssetsGuids.acogAtt.instanceGuid)
+	local att1 = ResourceManager:FindInstanceByGuid(m_AssetsGuids.silencerAtt.partitionGuid, m_AssetsGuids.silencerAtt.instanceGuid)
+	local grenadeLauncher = ResourceManager:FindInstanceByGuid(m_AssetsGuids.m320.partitionGuid, m_AssetsGuids.m320.instanceGuid)
+	local soldierAsset = ResourceManager:FindInstanceByGuid(m_AssetsGuids.soldierAsset.partitionGuid, m_AssetsGuids.soldierAsset.instanceGuid)
+	local soldierBlueprint = ResourceManager:FindInstanceByGuid(m_AssetsGuids.soldierBlueprint.partitionGuid, m_AssetsGuids.soldierBlueprint.instanceGuid)
+	local drPepper = ResourceManager:FindInstanceByGuid(m_AssetsGuids.drPepperCammo.partitionGuid, m_AssetsGuids.drPepperCammo.instanceGuid)
+
+	local rifleSlot = WeaponSlot.WeaponSlot_0
+	local grenadeLauncherSlot = WeaponSlot.WeaponSlot_1
+
 
 	-- Setting soldier primary weapon with its attachments and the M320 in the second slot.
-	player:SelectWeapon(WeaponSlot.WeaponSlot_0, SoldierWeaponUnlockAsset(weapon), { UnlockAsset(att0), UnlockAsset(att1) })
-	player:SelectWeapon(WeaponSlot.WeaponSlot_1, SoldierWeaponUnlockAsset(grenadeLauncher), {})
+	player:SelectWeapon(rifleSlot, SoldierWeaponUnlockAsset(weapon), { UnlockAsset(att0), UnlockAsset(att1) })
+	player:SelectWeapon(grenadeLauncherSlot, SoldierWeaponUnlockAsset(grenadeLauncher), {})
 
 	-- Setting soldier class and appearance
 	player:SelectUnlockAssets(VeniceSoldierCustomizationAsset(soldierAsset), { UnlockAsset(drPepper) })
@@ -262,8 +266,11 @@ function BoxGameServer:SpawnPlayer(player)
 	player:SpawnSoldierAt(soldier, transform, CharacterPoseType.CharacterPoseType_Stand)
 
 	-- Set the ammo of the M320 to 999 and remove additional ammo so you cant reload.
-	player.soldier:SetWeaponPrimaryAmmoByIndex(WeaponSlot.WeaponSlot_1, 999)
-	player.soldier:SetWeaponSecondaryAmmoByIndex(WeaponSlot.WeaponSlot_1, 0)
+	if player.soldier.weaponsComponent and player.soldier.weaponsComponent.weapons then
+		soldierWeapon = SoldierWeapon(player.soldier.weaponsComponent.weapons[grenadeLauncherSlot + 1]) -- lua is 1 indexed
+		soldierWeapon.primaryAmmo = 999
+		soldierWeapon.secondaryAmmo = 0
+	end
 end
 
 function BoxGameServer:SpawnBox(p_XOffset, p_YOffset, p_ZOffset)
