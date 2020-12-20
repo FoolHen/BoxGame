@@ -1,7 +1,7 @@
 class 'BoxGameServer'
 
 local Round = require 'round'
-local m_Round = Round(300, 2, 4, 3, true)
+local m_Round = Round(Config.RoundTime, Config.MinPlayers, Config.PreRoundTime, Config.RoundOverTime, true)
 
 -- In this table we keep guids of weapons, attachments and soldier info to spawn soldiers later on.
 local m_AssetsGuids = {
@@ -16,16 +16,13 @@ local m_AssetsGuids = {
 	drPepperCammo = {instanceGuid = Guid("2C86F862-3FEE-4231-804D-BBB769E7A78B"), partitionGuid = Guid("B06E6037-4797-47A5-8917-2772EC79B3C5")}
 }
 
--- Playable area dimensions.
-local m_AreaWidth = 10
-local m_AreaLength = 20
-local m_AreaHeight = 10
-
 local m_StartingPos = { x = 0, y = 100, z = 0}
 
 -- These are the sizes of the box. It's 1m wide and 1.29m tall.
 local m_BoxWidth = 1
 local m_BoxHeight = 1.29
+
+local m_WallWidth = 10
 
 local m_DisabledBoxes = {}
 local m_LevelLoaded = false
@@ -50,7 +47,7 @@ function BoxGameServer:RegisterEvents()
 end
 
 function BoxGameServer:OnUpdateManager(p_Delta, p_Pass)
-	if p_Pass == UpdatePass.UpdatePass_PreFrame then
+	if p_Pass == UpdatePass.UpdatePass_PreSim then
 		if m_PendingRestart then
 			m_PendingRestart = false
 			self:SetLevel()
@@ -67,23 +64,51 @@ function BoxGameServer:OnPlayerKilled(p_Victim, p_Inflictor, p_Position, p_Weapo
 		return
 	end
 
+	if Config.RoundMode == Mode.Flat then
+		self:CheckFFAModeRound()
+	else
+		self:CheckTeamModeRound()
+	end
+end
+
+function BoxGameServer:CheckFFAModeRound()
 	local s_AlivePlayers = 0
-	local s_Player = nil
+	local s_Winner = nil
 	for _, l_Player in pairs(PlayerManager:GetPlayers()) do
 		if l_Player.alive then
-			s_Player = l_Player
+			if s_AlivePlayers >= 1 then
+				return
+			end
+
+			s_Winner = l_Player
 			s_AlivePlayers = s_AlivePlayers + 1
 		end
 	end
 
 	if s_AlivePlayers == 1 then
-		ChatManager:SendMessage('Player ' .. s_Player.name .. ' wins!')
+		ChatManager:SendMessage('Player ' .. s_Winner.name .. ' wins!')
 	elseif s_AlivePlayers == 0 then
 		print('All players dead, this shouldn\'t happen.')
 	end
 
 	m_Round:endRound()
+end
 
+function BoxGameServer:CheckTeamModeRound()
+	local s_AlivePlayers = { [TeamId.Team1] = 0,  [TeamId.Team2] = 0 }
+	for _, l_Player in pairs(PlayerManager:GetPlayers()) do
+		if l_Player.alive then
+			s_AlivePlayers[l_Player.teamId] = s_AlivePlayers[l_Player.teamId] + 1
+		end
+	end
+
+	if s_AlivePlayers[TeamId.Team1] == 0 then
+		ChatManager:SendMessage('Team 1 wins!')
+		m_Round:endRound()
+	elseif s_AlivePlayers[TeamId.Team2] == 0 then
+		ChatManager:SendMessage('Team 2 wins!')
+		m_Round:endRound()
+	end
 end
 
 function BoxGameServer:OnPreRoundStarted()
@@ -111,27 +136,46 @@ end
 function BoxGameServer:OnLevelLoaded(p_Map, p_GameMode, p_Round)
 	m_LevelLoaded = true
 
+	local areaHeight = Config.AreaHeight
+
+	if Config.RoundMode == Mode.Flat then
+		areaHeight = 1
+	end
+
 	-- Spawn all boxes.
-	for x = 1, m_AreaWidth do
-		for y = 1, m_AreaHeight do
-			for z = 1, m_AreaLength do
+	for x = 1, Config.AreaWidth do
+		for y = 1, areaHeight do
+			for z = 1, Config.AreaLength do
 				self:SpawnBox(x, y, z)
 			end
 		end
 	end
 	
-	-- Spawn the walls that divide the top of the boxes in 2 spawn areas.
-	self:SpawnWalls()
+	if Config.RoundMode ~= Mode.Flat then
+		-- Spawn the walls that divide the top of the boxes in 2 spawn areas.
+		self:SpawnWalls()
+	end
 end
 
 function BoxGameServer:OnChat(player, recipientMask, message)
-	if message == 'pos' then
+	if message == '!pos' then
 		print(player.soldier.transform.trans)
+	elseif message == '!start' then
+		m_PendingRestart = true
+	elseif message == '!normal' then
+		self:SetMode(Mode.Normal) 
+	elseif message == '!noweapons' then
+		self:SetMode(Mode.Normal_NoWeapons)
+	elseif message == '!flat' then
+		self:SetMode(Mode.Flat)
 	end
+end
 
-	if message == 'start' then
-		self:SetLevel()
-	end
+function BoxGameServer:SetMode(mode)
+	Config.RoundMode = mode
+
+	ChatManager:SendMessage('Mode changed')
+	RCON:SendCommand('mapList.restartRound')
 end
 
 function BoxGameServer:SetLevel()
@@ -212,6 +256,12 @@ function BoxGameServer:SpawnPlayer(player)
 		return
 	end
 
+	local areaHeight = Config.AreaHeight
+
+	if Config.RoundMode == Mode.Flat then
+		areaHeight = 1
+	end
+
 	-- Create a LinearTransform to spawn the soldier with.
 	local transform = LinearTransform(
 		Vec3(1, 0, 0),
@@ -221,16 +271,16 @@ function BoxGameServer:SpawnPlayer(player)
 	)
 
 	-- We calculate the height and the x position of the spawn point.
-	transform.trans.x = m_StartingPos.x + m_AreaWidth * m_BoxWidth / 2
-	transform.trans.y = 1 +  m_StartingPos.y + m_AreaHeight * m_BoxHeight
+	transform.trans.x = m_StartingPos.x + Config.AreaWidth * m_BoxWidth / 2
+	transform.trans.y = 1 +  m_StartingPos.y + areaHeight * m_BoxHeight
 
 	-- We now calculate the z position, which is the side of the playable area each team plays on.
 	if player.teamId == TeamId.Team1 then
 		-- 1/4th of the total lenght of the playable area.
-		transform.trans.z = m_StartingPos.z + m_AreaLength * m_BoxWidth / 4
+		transform.trans.z = m_StartingPos.z + Config.AreaLength * m_BoxWidth / 4
 	elseif player.teamId == TeamId.Team2 then
 		-- 3/4ths for team 2.
-		transform.trans.z = m_StartingPos.z + m_AreaLength * 3 * m_BoxWidth / 4
+		transform.trans.z = m_StartingPos.z + Config.AreaLength * 3 * m_BoxWidth / 4
 	else
 		return
 	end
@@ -243,12 +293,21 @@ function BoxGameServer:SpawnPlayer(player)
 	local soldierBlueprint = ResourceManager:FindInstanceByGuid(m_AssetsGuids.soldierBlueprint.partitionGuid, m_AssetsGuids.soldierBlueprint.instanceGuid)
 	local drPepper = ResourceManager:FindInstanceByGuid(m_AssetsGuids.drPepperCammo.partitionGuid, m_AssetsGuids.drPepperCammo.instanceGuid)
 
-	local rifleSlot = WeaponSlot.WeaponSlot_0
-	local grenadeLauncherSlot = WeaponSlot.WeaponSlot_1
+	local rifleSlot
+	local grenadeLauncherSlot
 
+	if Config.RoundMode == Mode.Normal then
+		rifleSlot = WeaponSlot.WeaponSlot_0
+		grenadeLauncherSlot = WeaponSlot.WeaponSlot_1
+	else
+		-- only nade launcher 
+		grenadeLauncherSlot = WeaponSlot.WeaponSlot_0
+	end
 
 	-- Setting soldier primary weapon with its attachments and the M320 in the second slot.
-	player:SelectWeapon(rifleSlot, SoldierWeaponUnlockAsset(weapon), { UnlockAsset(att0), UnlockAsset(att1) })
+	if rifleSlot ~= nil then
+		player:SelectWeapon(rifleSlot, SoldierWeaponUnlockAsset(weapon), { UnlockAsset(att0), UnlockAsset(att1) })
+	end
 	player:SelectWeapon(grenadeLauncherSlot, SoldierWeaponUnlockAsset(grenadeLauncher), {})
 
 	-- Setting soldier class and appearance
@@ -284,23 +343,35 @@ function BoxGameServer:SpawnBox(p_XOffset, p_YOffset, p_ZOffset)
 end
 
 function BoxGameServer:SpawnWalls()
-	local s_Transform = LinearTransform(
-			Vec3(1,0,0),
-			Vec3(0,1,0),
-			Vec3(0,0,1),
-			Vec3(
-				m_StartingPos.x + (m_AreaWidth * m_BoxWidth) / 2.0 + 0.5,
-				m_StartingPos.y + (m_AreaHeight * m_BoxHeight) + 3.5,
-				m_StartingPos.z + (m_AreaLength * m_BoxWidth) / 2.0 + 0.5
+	local areaHeight = Config.AreaHeight
+
+	if Config.RoundMode == Mode.Flat then
+		areaHeight = 1
+	end
+
+	local nWalls = math.ceil(Config.AreaWidth / m_WallWidth)
+
+	local initPos = { x = m_StartingPos.x, y = m_StartingPos.y, z = m_StartingPos.z }
+
+	for i = 1, nWalls, 1 do
+		local s_Transform = LinearTransform(
+				Vec3(1,0,0),
+				Vec3(0,1,0),
+				Vec3(0,0,1),
+				Vec3(
+					initPos.x + (i - 1) * m_WallWidth + m_WallWidth / 2.0 + 0.5,
+					initPos.y + (areaHeight * m_BoxHeight) + 3.5,
+					initPos.z + (Config.AreaLength * m_BoxWidth) / 2.0 + 0.5
+				)
 			)
-		)
-	Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall1", m_AssetsGuids.wall.partitionGuid, m_AssetsGuids.wall.instanceGuid, tostring(s_Transform), nil)
+		Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall_a_"..i, m_AssetsGuids.wall.partitionGuid, m_AssetsGuids.wall.instanceGuid, tostring(s_Transform), nil)
 
-	-- We need to spawn a second wall and flip it 180º, as the other side of the wall doesnt have texture so you can see through the other side.
-	s_Transform.left.x = -1
-	s_Transform.forward.z = -1
+		-- We need to spawn a second wall and flip it 180º, as the other side of the wall doesnt have texture so you can see through the other side.
+		s_Transform.left.x = -1
+		s_Transform.forward.z = -1
 
-	Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall2", m_AssetsGuids.wall.partitionGuid, m_AssetsGuids.wall.instanceGuid, tostring(s_Transform), nil)
+		Events:Dispatch('BlueprintManager:SpawnBlueprint', "wall_b_"..i, m_AssetsGuids.wall.partitionGuid, m_AssetsGuids.wall.instanceGuid, tostring(s_Transform), nil)
+	end
 end
 
 g_BoxGameServer = BoxGameServer()

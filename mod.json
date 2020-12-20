@@ -1,12 +1,14 @@
 {
 	"Name": "BoxGame",
 	"Authors": ["FoolHen"],
-	"Description": "Minigame where 2 teams spawn at a big cube made of multiple boxes that you can break",
-	"URL": "",
+	"Description": "Break the boxes on the floor to create paths and flank the enemy",
+	"URL": "https://github.com/FoolHen/BoxGame",
 	"Version": "1.0.0",
 	"HasWebUI": false,
 	"HasVeniceEXT": true,
 	"Dependencies": {
-		"blueprintmanager": "^1.0.0"
-	}
+		"blueprintmanager": "^1.0.0",
+		"veniceext": "^1.0.6"
+	},
+	"Tags": ["boxgame", "minigame"]
 }
