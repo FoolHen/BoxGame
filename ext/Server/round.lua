@@ -32,6 +32,7 @@ function Round:__init(roundTime, minPlayers, preRoundTime, roundOverTime, announ
 end
 
 function Round:_resetVars()
+	self._waitingTime = 0
 	self._currentRoundTime = 0
 	self._currentRoundOverTime = 0
 	self._currentPreRoundTime = 0
@@ -64,7 +65,10 @@ function Round:endRound()
 end
 
 function Round:_onPlayerReady(player)
-	print('player '..player.name..' ready')
+	print('Player '..player.name..' is ready')
+	if self._announceInChat then
+		ChatManager:SendMessage('Player '..player.name..' connected.')
+	end
 	self._playersReady[tostring(player.guid)] = player.guid
 end
 
@@ -74,8 +78,10 @@ end
 
 function Round:_numOfPlayersReady()
 	local n = 0
-	for _, __ in pairs(self._playersReady) do
-		n = n + 1
+	for _, v in pairs(self._playersReady) do
+		if v ~= nil then
+			n = n + 1
+		end
 	end
 	return n
 end
@@ -90,7 +96,7 @@ function Round:_onUpdate(delta, simulationDelta)
 
 	-- If the game state is in waiting for players
 	if self._roundState == RoundState.WaitingForPlayers then
-		self:_onWaitingForPlayers()
+		self:_onWaitingForPlayers(self._accumulatedDelta)
 	end
 
 	-- If the game state is in preround
@@ -111,7 +117,7 @@ function Round:_onUpdate(delta, simulationDelta)
 	self._accumulatedDelta = 0
 end
 
-function Round:_onWaitingForPlayers()
+function Round:_onWaitingForPlayers(delta)
 	if self._roundState ~= RoundState.WaitingForPlayers then
 		return
 	end
@@ -125,6 +131,16 @@ function Round:_onWaitingForPlayers()
 		else
 			self:_setRoundState(RoundState.PreRound)
 		end
+
+		return
+	end
+
+	-- announce players needed
+	self._waitingTime = self._waitingTime + delta
+
+	-- Check every 10 seconds to announce how many players are needed.
+	if self._waitingTime % 10 <= UPDATE_RATE and self._announceInChat then
+		ChatManager:SendMessage('Waiting for players. '..(self._minPlayers - playerCount)..' more player(s) needed to start the round.')
 	end
 end
 
